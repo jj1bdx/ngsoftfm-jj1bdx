@@ -240,6 +240,7 @@ private:
 
   IQSampleVector m_buf_iftuned;
   IQSampleVector m_buf_iffiltered;
+  IQSampleVector m_buf_multipath_filtered;
   SampleVector m_buf_baseband;
   SampleVector m_buf_baseband_raw;
   SampleVector m_buf_mono;
@@ -248,6 +249,7 @@ private:
 
   FineTuner m_finetuner;
   LowPassFilterFirIQ m_iffilter;
+  MultipathFilterFirIQ m_multipath_filter;
   DiscriminatorEqualizer m_disceq;
   PhaseDiscriminator m_phasedisc;
   DownsampleFilter m_resample_baseband;

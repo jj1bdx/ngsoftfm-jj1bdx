@@ -487,4 +487,65 @@ void HighPassFilterIir::process_inplace(SampleVector &samples) {
   }
 }
 
+// MultipathFilterFirIQ
+
+// Construct multipath filter.
+MultipathFilterFirIQ::MultipathFilterFirIQ(unsigned int filter_order)
+    : m_order(filter_order) {
+
+    m_center_index = m_order;
+    m_taps = m_order * 2 + 1;
+    m_coeff.resize(m_taps);
+    m_state.resize(m_taps);
+
+    for (unsigned int i = 1; i <= m_order; i++) {
+        m_coeff[m_center_index - i] = 0;
+        m_coeff[m_center_index + i] = 0;
+    }
+    m_coeff[m_center_index] = 1.0;
+}
+
+// Process samples.
+void MultipathFilterFirIQ::process(const IQSampleVector &samples_in,
+                                 IQSampleVector &samples_out) {
+  unsigned int taps = m_state.size();
+  unsigned int n = samples_in.size();
+
+  samples_out.resize(n);
+
+  if (n == 0)
+    return;
+
+  // The first few samples need data from m_state.
+  unsigned int i = 0;
+  for (; i < n && i < taps ; i++) {
+    IQSample y = 0;
+    for (unsigned int j = 0; j < taps - i; j++) {
+      y += m_state[i + j] * m_coeff[j];
+    }
+    for (unsigned int j = taps - i; j < taps; j++) {
+      y += samples_in[i - taps + j] * m_coeff[j];
+    }
+    samples_out[i] = y;
+  }
+
+  // Remaining samples only need data from samples_in.
+  for (; i < n; i++) {
+    IQSample y = 0;
+    IQSampleVector::const_iterator inp = samples_in.begin() + i - taps;
+    for (unsigned int j = 0; j < taps; j++) {
+      y += inp[j] * m_coeff[j];
+    }
+    samples_out[i] = y;
+  }
+
+  // Update m_state.
+  if (n < taps) {
+    copy(m_state.begin() + n, m_state.end(), m_state.begin());
+    copy(samples_in.begin(), samples_in.end(), m_state.end() - n);
+  } else {
+    copy(samples_in.end() - taps, samples_in.end(), m_state.begin());
+  }
+}
+
 /* end */

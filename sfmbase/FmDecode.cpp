@@ -296,6 +296,10 @@ FmDecoder::FmDecoder(double sample_rate_if, double ifeq_static_gain,
       ,
       m_iffilter(10, bandwidth_if / sample_rate_if)
 
+      // Construct MultipathFilterFirIQ
+      ,
+      m_multipath_filter(40)
+
       // Construct DiscriminatorEqualizer
       ,
       m_disceq(ifeq_static_gain, ifeq_fit_factor)
@@ -358,8 +362,11 @@ void FmDecoder::process(const IQSampleVector &samples_in, SampleVector &audio) {
   // Measure IF peak level.
   m_if_peak_level = peak_level_approx(m_buf_iffiltered);
 
+  // Apply multipath filter.
+  m_multipath_filter.process(m_buf_iffiltered, m_buf_multipath_filtered);
+
   // Extract carrier frequency.
-  m_phasedisc.process(m_buf_iffiltered, m_buf_baseband_raw);
+  m_phasedisc.process(m_buf_multipath_filtered, m_buf_baseband_raw);
 
   // Compensate 0th-hold aperture effect
   // by applying the equalizer to the discriminator output.

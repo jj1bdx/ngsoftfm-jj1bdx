@@ -170,4 +170,20 @@ private:
   Sample x1, x2, y1, y2;
 };
 
+class MultipathFilterFirIQ {
+public:
+
+  MultipathFilterFirIQ(unsigned int filter_order);
+
+  /** Process samples. */
+  void process(const IQSampleVector &samples_in, IQSampleVector &samples_out);
+
+private:
+  unsigned int m_order;
+  unsigned int m_center_index;
+  unsigned int m_taps;
+  std::vector<IQSample::value_type> m_coeff;
+  IQSampleVector m_state;
+};
+
 #endif
