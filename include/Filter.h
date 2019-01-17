@@ -171,6 +171,7 @@ private:
 };
 
 class MultipathFilterFirIQ {
+
 public:
 
   MultipathFilterFirIQ(unsigned int filter_order);
@@ -182,7 +183,9 @@ private:
   unsigned int m_order;
   unsigned int m_center_index;
   unsigned int m_taps;
-  std::vector<IQSample::value_type> m_coeff;
+  float m_reference_level;
+  float m_feedback_factor;
+  std::vector<IQSample> m_coeff;
   IQSampleVector m_state;
 };
 

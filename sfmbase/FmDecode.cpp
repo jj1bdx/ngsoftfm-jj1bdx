@@ -298,7 +298,7 @@ FmDecoder::FmDecoder(double sample_rate_if, double ifeq_static_gain,
 
       // Construct MultipathFilterFirIQ
       ,
-      m_multipath_filter(40)
+      m_multipath_filter(200)
 
       // Construct DiscriminatorEqualizer
       ,

@@ -491,7 +491,8 @@ void HighPassFilterIir::process_inplace(SampleVector &samples) {
 
 // Construct multipath filter.
 MultipathFilterFirIQ::MultipathFilterFirIQ(unsigned int filter_order)
-    : m_order(filter_order) {
+    : m_order(filter_order), m_reference_level(1.0),
+      m_feedback_factor(0.003) {
 
     m_center_index = m_order;
     m_taps = m_order * 2 + 1;
@@ -502,7 +503,7 @@ MultipathFilterFirIQ::MultipathFilterFirIQ(unsigned int filter_order)
         m_coeff[m_center_index - i] = 0;
         m_coeff[m_center_index + i] = 0;
     }
-    m_coeff[m_center_index] = 1.0;
+    m_coeff[m_center_index] = IQSample(1.0, 0.0);
 }
 
 // Process samples.
@@ -512,6 +513,10 @@ void MultipathFilterFirIQ::process(const IQSampleVector &samples_in,
   unsigned int n = samples_in.size();
 
   samples_out.resize(n);
+
+  IQSampleVector envelope;
+  std::vector<float> envelope_error;
+  envelope_error.resize(taps);
 
   if (n == 0)
     return;
@@ -537,14 +542,33 @@ void MultipathFilterFirIQ::process(const IQSampleVector &samples_in,
       y += inp[j] * m_coeff[j];
     }
     samples_out[i] = y;
+    if ((i - taps) < taps) {
+        envelope_error[i - taps] =
+            sqrt(y.real() * y.real() +
+            y.imag() * y.imag()) - (float)m_reference_level;
+        fprintf(stderr, "envelope_error[%u] = %f\n", i, envelope_error[i-taps]);
+    }
   }
-
+ 
   // Update m_state.
   if (n < taps) {
     copy(m_state.begin() + n, m_state.end(), m_state.begin());
     copy(samples_in.begin(), samples_in.end(), m_state.end() - n);
   } else {
     copy(samples_in.end() - taps, samples_in.end(), m_state.begin());
+  }
+
+  // Compute new coefficients.
+
+  unsigned int k = 0;
+  for (; k < taps - 1; k++) {
+     IQSample offset = m_feedback_factor * envelope_error[k] *
+                    (samples_in[taps + taps + k] * std::conj(samples_out[taps + k]));
+     if (k == m_center_index) {
+         offset *= 0.05;
+     }
+     m_coeff[k] -= offset;
+     fprintf(stderr, "coeff[%u] = %f + j %f\n", k, m_coeff[k].real(), m_coeff[k].imag());
   }
 }
 
