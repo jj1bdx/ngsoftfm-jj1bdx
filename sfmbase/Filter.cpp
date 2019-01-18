@@ -492,18 +492,14 @@ void HighPassFilterIir::process_inplace(SampleVector &samples) {
 // Construct multipath filter.
 MultipathFilterFirIQ::MultipathFilterFirIQ(unsigned int filter_order)
     : m_order(filter_order), m_reference_level(0.707),
-      m_feedback_factor(0.004) {
+      m_feedback_factor(0.0004) {
 
     m_center_index = m_order;
     m_taps = m_order * 2 + 1;
     m_coeff.resize(m_taps);
     m_state.resize(m_taps);
 
-    for (unsigned int i = 1; i <= m_order; i++) {
-        m_coeff[m_center_index - i] = 0;
-        m_coeff[m_center_index + i] = 0;
-    }
-    m_coeff[m_center_index] = IQSample(1.0, 0.0);
+    m_coeff[0] = IQSample(1.0, 0.0);
 }
 
 // Process samples.
@@ -515,7 +511,6 @@ void MultipathFilterFirIQ::process(const IQSampleVector &samples_in,
   samples_out.resize(n);
 
   float e;
-  float esum = 0;
 
   if (n == 0)
     return;
@@ -531,13 +526,7 @@ void MultipathFilterFirIQ::process(const IQSampleVector &samples_in,
       y += samples_in[i - taps + j] * m_coeff[j];
     }
     samples_out[i] = y;
-
-    e = std::norm(y);
-    esum += e;
-
   }
-
-  unsigned int i2 = i;
 
   // Remaining samples only need data from samples_in.
   for (; i < n; i++) {
@@ -548,9 +537,17 @@ void MultipathFilterFirIQ::process(const IQSampleVector &samples_in,
     }
     samples_out[i] = y;
 
-    e = std::norm(y);
-    esum += e;
-
+    e = std::norm(y) - m_reference_level;
+    fprintf(stderr, "e = %f\n", e);
+    fprintf(stderr, "i = %u, y = %f + j %f\n", i, y.real(), y.imag());
+    for (unsigned int k = 0; k < taps ; k++) {
+      IQSample offset = m_feedback_factor * e * (inp[k] * std::conj(y));
+      if (k == 0) {
+         offset *= 0.01;
+      }
+      m_coeff[k] -= offset;
+      fprintf(stderr, "m_coeff[%u] = %f + j %f\n", k, m_coeff[k].real(), m_coeff[k].imag());
+    }
   }
  
   // Update m_state.
@@ -561,20 +558,6 @@ void MultipathFilterFirIQ::process(const IQSampleVector &samples_in,
     copy(samples_in.end() - taps, samples_in.end(), m_state.begin());
   }
 
-    // Compute new coefficients.
-    IQSample y2 = samples_out[i2];
-    fprintf(stderr, "i = %u, y2 = %f + j %f\n", i, y2.real(), y2.imag());
-    e = esum / n - m_reference_level;
-    fprintf(stderr, "e = %f\n", e);
-    for (unsigned int k = 0; k < taps ; k++) {
-      IQSample offset = m_feedback_factor * e * (samples_in[i2 + k] * std::conj(y2));
-      if (k == m_center_index) {
-         offset *= 0.05;
-      }
-      m_coeff[k] -= offset;
-      fprintf(stderr, "m_coeff[%u] = %f + j %f\n", k, m_coeff[k].real(), m_coeff[k].imag());
-    }
- 
 }
 
 /* end */
