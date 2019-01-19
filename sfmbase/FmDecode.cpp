@@ -22,9 +22,10 @@
 #include "FmDecode.h"
 #include "fastatan2.h"
 
-// Compute RMS and peak levels
+// Compute RMS, peak levels, and estimated 
 // over a small prefix of the specified sample vector.
 void rms_peak_level_approx(const IQSampleVector &samples,
+        SampleVector &samples_distortion,
         double &rms, double &peak) {
   unsigned int n = samples.size();
   n = (n + 63) / 64;
@@ -40,6 +41,20 @@ void rms_peak_level_approx(const IQSampleVector &samples,
   }
   rms = sqrt(level / n);
   peak = sqrt(peak_level);
+
+  unsigned int n2 = samples.size();
+  samples_distortion.resize(n2);
+
+  // fprintf(stderr, "n2 = %d\n", n2);
+
+  for (unsigned int i = 0; i < n2; i++) {
+    const IQSample &s = samples[i];
+    IQSample::value_type re = s.real(), im = s.imag();
+    IQSample::value_type sqsum = re * re + im * im;
+    IQSample::value_type offset = sqrt(sqsum) - rms;
+    IQSample::value_type distortion = offset / (1.0 + (2.0 * offset));
+    samples_distortion[i] = distortion;
+  }
 }
 
 /* ****************  class PhaseDiscriminator  **************** */
@@ -345,8 +360,16 @@ void FmDecoder::process(const IQSampleVector &samples_in, SampleVector &audio) {
 
   // Measure IF level.
   double if_rms;
-  rms_peak_level_approx(m_buf_iffiltered, if_rms, m_if_peak_level);
+  SampleVector distortion;
+  distortion.resize(m_buf_iffiltered.size());
+  rms_peak_level_approx(m_buf_iffiltered, distortion, if_rms, m_if_peak_level);
   m_if_level = 0.95 * m_if_level + 0.05 * (double)if_rms;
+
+#if 0
+  for (unsigned int i = 0; i < distortion.size(); i++) {
+    fprintf(stderr, "distortion[%u] = %f\n", i, distortion[i]);
+  }
+#endif
 
   // Extract carrier frequency.
   m_phasedisc.process(m_buf_iffiltered, m_buf_baseband_raw);
