@@ -492,7 +492,7 @@ void HighPassFilterIir::process_inplace(SampleVector &samples) {
 // Construct multipath filter.
 MultipathFilterFirIQ::MultipathFilterFirIQ(unsigned int filter_order)
     : m_order(filter_order), m_reference_level(0.707),
-      m_feedback_factor(0.0004) {
+      m_feedback_factor(0.000001) {
 
     m_center_index = m_order;
     m_taps = m_order * 2 + 1;
@@ -537,16 +537,15 @@ void MultipathFilterFirIQ::process(const IQSampleVector &samples_in,
     }
     samples_out[i] = y;
 
-    e = std::norm(y) - m_reference_level;
-    fprintf(stderr, "e = %f\n", e);
-    fprintf(stderr, "i = %u, y = %f + j %f\n", i, y.real(), y.imag());
+    IQSample::value_type yn = std::norm(y);
+    e = yn - m_reference_level;
+    // fprintf(stderr, "i = %u, y = %f + j %f\n", i, y.real(), y.imag());
     for (unsigned int k = 0; k < taps ; k++) {
-      IQSample offset = m_feedback_factor * e * (inp[k] * std::conj(y));
+      IQSample offset = m_feedback_factor * e * inp[k] * yn;
       if (k == 0) {
          offset *= 0.01;
       }
       m_coeff[k] -= offset;
-      fprintf(stderr, "m_coeff[%u] = %f + j %f\n", k, m_coeff[k].real(), m_coeff[k].imag());
     }
   }
  
@@ -556,6 +555,11 @@ void MultipathFilterFirIQ::process(const IQSampleVector &samples_in,
     copy(samples_in.begin(), samples_in.end(), m_state.end() - n);
   } else {
     copy(samples_in.end() - taps, samples_in.end(), m_state.begin());
+  }
+
+  fprintf(stderr, "e = %f\n", e);
+  for (unsigned int k = 0; k < taps ; k++) {
+    fprintf(stderr, "m_coeff[%u] = %f + j %f\n", k, m_coeff[k].real(), m_coeff[k].imag());
   }
 
 }
