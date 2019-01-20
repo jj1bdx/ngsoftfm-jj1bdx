@@ -57,6 +57,49 @@ void rms_peak_level_approx(const IQSampleVector &samples,
   }
 }
 
+// Try minimize distortion.
+
+unsigned int recalculate_distortion(SampleVector &samples,
+                                    SampleVector &distortion) {
+  const unsigned int max_delay = 200;
+  // double new_dist_sumsq_values[max_delay];
+  unsigned int n = samples.size();
+
+  SampleVector delayed;
+  delayed.resize(n);
+
+  Sample old_dist = 0.0;
+  Sample old_dist_sumsq = 0.0;
+  for (unsigned int i = 0; i < n; i++) {
+    old_dist = distortion[i];
+    old_dist_sumsq += old_dist * old_dist;
+  }
+  fprintf(stderr, "old_dist_sumsq = %f\n", old_dist_sumsq);
+
+  DifferentialDelayLine delayline(max_delay);
+
+  Sample new_dist = 0.0;
+  Sample new_dist_sumsq = 0.0;
+  Sample min_new_dist_sumsq = 10000000.0;
+  unsigned int min_delay = 0;
+  for (unsigned int delay = max_delay - 1; delay > 10; delay--) {
+    delayline.process(samples, delayed, delay);
+    new_dist_sumsq = 0.0;
+    for (unsigned int i = 0; i < n; i++) {
+      new_dist = distortion[i] * delayed[i];
+      new_dist_sumsq += new_dist * new_dist;
+    }
+    if (new_dist_sumsq < min_new_dist_sumsq) {
+      min_new_dist_sumsq = new_dist_sumsq;
+      min_delay = delay;
+    }
+  }
+
+  fprintf(stderr, "min_delay = %u, min_new_dist_sumsq = %f\n", min_delay,
+          min_new_dist_sumsq);
+  return min_delay;
+}
+
 /* ****************  class PhaseDiscriminator  **************** */
 
 // Construct phase discriminator.
@@ -117,27 +160,43 @@ DifferentialDelayLine::DifferentialDelayLine(unsigned int delay)
 }
 
 // Process samples.
-void DifferentialDelayLine::process(const IQSampleVector &samples_in,
-                                    IQSampleVector &samples_out) {
-  unsigned int delay = m_delay;
-  unsigned int n = samples_in.size();
+void DifferentialDelayLine::process(const SampleVector &samples_in,
+                                    SampleVector &samples_out,
+                                    unsigned int new_delay) {
+  unsigned int old_delay = m_delay;
+  unsigned int delay = new_delay;
 
+  unsigned int n = samples_in.size();
   samples_out.resize(n);
 
   if (n == 0) {
     return;
   }
 
-  unsigned int i = 0;
+  unsigned int delay_offset = old_delay - delay;
+
   // The first few samples need data from m_state.
+  unsigned int i = 0;
+
+  // If delay gets longer, just copy for non-existent state.
+  if (delay_offset < 0) {
+    for (; i < -delay_offset; i++) {
+      samples_out[i] = samples_in[i];
+    }
+  }
+
+  // If delay gets shorter, use closer data to the end.
   for (; i < delay; i++) {
-    samples_out[i] = m_state[i];
+    samples_out[i] = samples_in[i] - m_state[i + delay_offset];
   }
 
   // Remaining samples only need data from samples_in.
   for (; i < n; i++) {
     samples_out[i] = samples_in[i] - samples_in[i - delay];
   }
+
+  delay = new_delay;
+  m_state.resize(delay);
 
   // Update m_state.
   if (n < delay) {
@@ -351,6 +410,10 @@ FmDecoder::FmDecoder(double sample_rate_if, double ifeq_static_gain,
       ,
       m_phasedisc(freq_dev / sample_rate_if)
 
+      // Construct DifferentialDelayLine
+      ,
+      m_diffdelay(1000)
+
       // Construct DownsampleFilter for baseband
       ,
       m_resample_baseband(8 * downsample, 0.4 / downsample, downsample, true)
@@ -398,18 +461,12 @@ void FmDecoder::process(const IQSampleVector &samples_in, SampleVector &audio) {
   // Low pass filter to isolate station.
   m_iffilter.process(m_buf_iftuned, m_buf_iffiltered);
 
-  // Measure IF level.
+  // Measure IF level and compute distortion.
   double if_rms;
   SampleVector distortion;
   distortion.resize(m_buf_iffiltered.size());
   rms_peak_level_approx(m_buf_iffiltered, distortion, if_rms, m_if_peak_level);
   m_if_level = 0.95 * m_if_level + 0.05 * (double)if_rms;
-
-#if 0
-  for (unsigned int i = 0; i < distortion.size(); i++) {
-    fprintf(stderr, "distortion[%u] = %f\n", i, distortion[i]);
-  }
-#endif
 
   // Extract carrier frequency.
   m_phasedisc.process(m_buf_iffiltered, m_buf_baseband_raw);
@@ -417,6 +474,30 @@ void FmDecoder::process(const IQSampleVector &samples_in, SampleVector &audio) {
   // Compensate 0th-hold aperture effect
   // by applying the equalizer to the discriminator output.
   m_disceq.process(m_buf_baseband_raw, m_buf_baseband);
+
+  unsigned int computed_delay;
+  // Compute optimal delay value
+  computed_delay = recalculate_distortion(m_buf_baseband, distortion);
+
+  // Compute differential delay.
+  m_diffdelay.process(m_buf_baseband, m_buf_delayedoutput, computed_delay);
+
+  // Compute new distortion by multiplying old distortion and delayed diff,
+  // then subtract the new distortion from the input.
+  SampleVector new_distortion;
+  new_distortion.resize(m_buf_baseband.size());
+  for (unsigned int i = 0; i < m_buf_baseband.size(); i++) {
+    new_distortion[i] = distortion[i] * m_buf_delayedoutput[i];
+    m_buf_baseband[i] -= new_distortion[i];
+  }
+
+  double dist_sumsq = 0;
+  for (unsigned int i = 0; i < new_distortion.size(); i++) {
+    dist_sumsq += new_distortion[i] * new_distortion[i];
+  }
+
+  fprintf(stderr, "\ncomputed_delay = %u, dist_rms = %f\n", computed_delay,
+          sqrt(dist_sumsq));
 
   // Downsample baseband signal to reduce processing.
   if (m_downsample > 1) {

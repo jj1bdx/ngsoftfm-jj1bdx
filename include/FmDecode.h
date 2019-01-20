@@ -70,7 +70,7 @@ public:
 
   // process samples.
   void process(const SampleVector &samples_in, SampleVector &samples_out,
-          unsigned int delay);
+               unsigned int delay);
 
 private:
   unsigned int m_delay;
