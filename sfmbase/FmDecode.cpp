@@ -68,14 +68,6 @@ unsigned int recalculate_distortion(SampleVector &samples,
   SampleVector delayed;
   delayed.resize(n);
 
-  Sample old_dist = 0.0;
-  Sample old_dist_sumsq = 0.0;
-  for (unsigned int i = 0; i < n; i++) {
-    old_dist = distortion[i];
-    old_dist_sumsq += old_dist * old_dist;
-  }
-  fprintf(stderr, "old_dist_sumsq = %f\n", old_dist_sumsq);
-
   DifferentialDelayLine delayline(max_delay);
 
   Sample new_dist = 0.0;
@@ -95,7 +87,7 @@ unsigned int recalculate_distortion(SampleVector &samples,
     }
   }
 
-  fprintf(stderr, "min_delay = %u, min_new_dist_sumsq = %f\n", min_delay,
+  fprintf(stderr, "\nmin_delay = %u, min_new_dist_sumsq = %f\n", min_delay,
           min_new_dist_sumsq);
   return min_delay;
 }
@@ -482,13 +474,14 @@ void FmDecoder::process(const IQSampleVector &samples_in, SampleVector &audio) {
   // Compute differential delay.
   m_diffdelay.process(m_buf_baseband, m_buf_delayedoutput, computed_delay);
 
-  // Compute new distortion by multiplying old distortion and delayed diff,
-  // then subtract the new distortion from the input.
+  // Compute new distortion correction signal
+  // by multiplying old distortion and delayed diff,
+  // then add the new distortion correction signal from the input.
   SampleVector new_distortion;
   new_distortion.resize(m_buf_baseband.size());
   for (unsigned int i = 0; i < m_buf_baseband.size(); i++) {
     new_distortion[i] = distortion[i] * m_buf_delayedoutput[i];
-    m_buf_baseband[i] -= new_distortion[i];
+    m_buf_baseband[i] += new_distortion[i];
   }
 
   double dist_sumsq = 0;
