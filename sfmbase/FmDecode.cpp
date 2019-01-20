@@ -22,11 +22,11 @@
 #include "FmDecode.h"
 #include "fastatan2.h"
 
-// Compute RMS, peak levels, and estimated 
+// Compute RMS, peak levels, and estimated
 // over a small prefix of the specified sample vector.
 void rms_peak_level_approx(const IQSampleVector &samples,
-        SampleVector &samples_distortion,
-        double &rms, double &peak) {
+                           SampleVector &samples_distortion, double &rms,
+                           double &peak) {
   unsigned int n = samples.size();
   n = (n + 63) / 64;
 
@@ -106,6 +106,46 @@ void DiscriminatorEqualizer::process(const SampleVector &samples_in,
     s0 = s1;
   }
   m_last1_sample = s0;
+}
+
+// Class DifferentialDelayLine
+
+// Construct differential delay line.
+DifferentialDelayLine::DifferentialDelayLine(unsigned int delay)
+    : m_delay(delay) {
+  m_state.resize(delay);
+}
+
+// Process samples.
+void DifferentialDelayLine::process(const IQSampleVector &samples_in,
+                                    IQSampleVector &samples_out) {
+  unsigned int delay = m_delay;
+  unsigned int n = samples_in.size();
+
+  samples_out.resize(n);
+
+  if (n == 0) {
+    return;
+  }
+
+  unsigned int i = 0;
+  // The first few samples need data from m_state.
+  for (; i < delay; i++) {
+    samples_out[i] = m_state[i];
+  }
+
+  // Remaining samples only need data from samples_in.
+  for (; i < n; i++) {
+    samples_out[i] = samples_in[i] - samples_in[i - delay];
+  }
+
+  // Update m_state.
+  if (n < delay) {
+    copy(m_state.begin() + n, m_state.end(), m_state.begin());
+    copy(samples_in.begin(), samples_in.end(), m_state.end() - n);
+  } else {
+    copy(samples_in.end() - delay, samples_in.end(), m_state.begin());
+  }
 }
 
 /* ****************  class PilotPhaseLock  **************** */

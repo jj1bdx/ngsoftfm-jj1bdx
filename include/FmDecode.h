@@ -63,6 +63,19 @@ private:
   double m_last1_sample;
 };
 
+class DifferentialDelayLine {
+public:
+  // Construct differential delay line.
+  DifferentialDelayLine(unsigned int delay);
+
+  // process samples.
+  void process(const IQSampleVector &samples_in, IQSampleVector &samples_out);
+
+private:
+  unsigned int m_delay;
+  IQSampleVector m_state;
+};
+
 /** Phase-locked loop for stereo pilot. */
 class PilotPhaseLock {
 public:
