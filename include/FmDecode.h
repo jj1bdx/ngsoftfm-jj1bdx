@@ -69,11 +69,12 @@ public:
   DifferentialDelayLine(unsigned int delay);
 
   // process samples.
-  void process(const IQSampleVector &samples_in, IQSampleVector &samples_out);
+  void process(const SampleVector &samples_in, SampleVector &samples_out,
+          unsigned int delay);
 
 private:
   unsigned int m_delay;
-  IQSampleVector m_state;
+  SampleVector m_state;
 };
 
 /** Phase-locked loop for stereo pilot. */
@@ -253,6 +254,7 @@ private:
 
   IQSampleVector m_buf_iftuned;
   IQSampleVector m_buf_iffiltered;
+  SampleVector m_buf_delayedoutput;
   SampleVector m_buf_baseband;
   SampleVector m_buf_baseband_raw;
   SampleVector m_buf_mono;
@@ -263,6 +265,7 @@ private:
   LowPassFilterFirIQ m_iffilter;
   DiscriminatorEqualizer m_disceq;
   PhaseDiscriminator m_phasedisc;
+  DifferentialDelayLine m_diffdelay;
   DownsampleFilter m_resample_baseband;
   PilotPhaseLock m_pilotpll;
   DownsampleFilter m_resample_mono;
