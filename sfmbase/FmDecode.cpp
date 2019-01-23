@@ -24,8 +24,8 @@
 
 // Compute RMS and peak levels
 // over a small prefix of the specified sample vector.
-void rms_peak_level_approx(const IQSampleVector &samples,
-        double &rms, double &peak) {
+void rms_peak_level_approx(const IQSampleVector &samples, double &rms,
+                           double &peak) {
   unsigned int n = samples.size();
   n = (n + 63) / 64;
 
@@ -157,10 +157,12 @@ PilotPhaseLock::PilotPhaseLock(double freq, double bandwidth,
 // Process samples and generate the 38kHz locked tone;
 // remove remained locked 19kHz tone from samples_in if locked.
 void PilotPhaseLock::process(SampleVector &samples_in,
-                             SampleVector &samples_out, bool pilot_shift) {
+                             SampleVector &sin_samples_out,
+                             SampleVector &cos_samples_out) {
   unsigned int n = samples_in.size();
 
-  samples_out.resize(n);
+  sin_samples_out.resize(n);
+  cos_samples_out.resize(n);
 
   bool was_locked = (m_lock_cnt >= m_lock_delay);
   m_pps_events.clear();
@@ -175,16 +177,12 @@ void PilotPhaseLock::process(SampleVector &samples_in,
     Sample psin = sin(m_phase);
     Sample pcos = cos(m_phase);
 
-    // Generate double-frequency output.
-    if (pilot_shift) {
-      // Use cos(2*x) to shift phase for pi/4 (90 degrees)
-      // cos(2*x) = 2 * cos(x) * cos(x) - 1
-      samples_out[i] = 2 * pcos * pcos - 1;
-    } else {
-      // Proper phase: not shifted
-      // sin(2*x) = 2 * sin(x) * cos(x)
-      samples_out[i] = 2 * psin * pcos;
-    }
+    // Proper phase: not shifted
+    // sin(2*x) = 2 * sin(x) * cos(x)
+    sin_samples_out[i] = 2 * psin * pcos;
+    // Use cos(2*x) to shift phase for pi/4 (90 degrees)
+    // cos(2*x) = 2 * cos(x) * cos(x) - 1
+    cos_samples_out[i] = 2 * pcos * pcos - 1;
 
     // Multiply locked tone with input.
     Sample x = samples_in[i];
@@ -315,6 +313,22 @@ FmDecoder::FmDecoder(double sample_rate_if, double ifeq_static_gain,
 
       // Construct DownsampleFilter for stereo channel
       ,
+      m_resample_sin_output(
+          int(m_sample_rate_baseband / 1000.0),     // filter_order
+          bandwidth_pcm / m_sample_rate_baseband,   // cutoff
+          m_sample_rate_baseband / sample_rate_pcm, // downsample
+          false)                                    // integer_factor
+
+      // Construct DownsampleFilter for stereo channel
+      ,
+      m_resample_cos_output(
+          int(m_sample_rate_baseband / 1000.0),     // filter_order
+          bandwidth_pcm / m_sample_rate_baseband,   // cutoff
+          m_sample_rate_baseband / sample_rate_pcm, // downsample
+          false)                                    // integer_factor
+
+      // Construct DownsampleFilter for stereo channel
+      ,
       m_resample_stereo(int(m_sample_rate_baseband / 1000.0),   // filter_order
                         bandwidth_pcm / m_sample_rate_baseband, // cutoff
                         m_sample_rate_baseband / sample_rate_pcm, // downsample
@@ -369,7 +383,7 @@ void FmDecoder::process(const IQSampleVector &samples_in, SampleVector &audio) {
 
   // Lock on stereo pilot,
   // and remove locked 19kHz tone from the composite signal.
-  m_pilotpll.process(m_buf_baseband, m_buf_rawstereo, m_pilot_shift);
+  m_pilotpll.process(m_buf_baseband, m_buf_sin_output, m_buf_cos_output);
   m_stereo_detected = m_pilotpll.locked();
 
   // Extract mono audio signal.
@@ -379,15 +393,24 @@ void FmDecoder::process(const IQSampleVector &samples_in, SampleVector &audio) {
 
   if (m_stereo_enabled) {
 
-    // Demodulate stereo signal.
-    demod_stereo(m_buf_baseband, m_buf_rawstereo);
-
+    // Demodulate stereo signal both in and pi/2-shifted phases.
+    product_mix(m_buf_baseband, m_buf_sin_output);
+    product_mix(m_buf_baseband, m_buf_cos_output);
     // Extract audio and downsample.
-    // NOTE: This MUST be done even if no stereo signal is detected yet,
-    // because the downsamplers for mono and stereo signal must be
-    // kept in sync.
-    m_resample_stereo.process(m_buf_rawstereo, m_buf_stereo);
-
+    // NOTE:
+    // This MUST be done even if no stereo signal is detected yet,
+    // because the downsamplers for mono and stereo signal
+    // must be kept in sync.
+    m_resample_sin_output.process(m_buf_sin_output, m_buf_rawstereo_in);
+    m_resample_cos_output.process(m_buf_cos_output, m_buf_rawstereo_out);
+    // Subtract distortion content from the in-phase content.
+    // TODO: make this a method
+    unsigned int n = m_buf_rawstereo_in.size();
+    assert(n == m_buf_rawstereo_out.size());
+    m_buf_stereo.resize(n);
+    for (unsigned int i = 0; i < n; i++) {
+      m_buf_stereo[i] = m_buf_rawstereo_in[i] - m_buf_rawstereo_out[i];
+    }
     // DC blocking
     m_dcblock_stereo.process_inplace(m_buf_stereo);
 
@@ -395,7 +418,7 @@ void FmDecoder::process(const IQSampleVector &samples_in, SampleVector &audio) {
       if (m_pilot_shift) {
         // Duplicate L-R shifted output in left/right channels.
         // No deemphasis
-        mono_to_left_right(m_buf_stereo, audio);
+        mono_to_left_right(m_buf_rawstereo_out, audio);
       } else {
         // Extract left/right channels from (L+R) / (L-R) signals.
         stereo_to_left_right(m_buf_mono, m_buf_stereo, audio);
@@ -420,18 +443,17 @@ void FmDecoder::process(const IQSampleVector &samples_in, SampleVector &audio) {
   }
 }
 
-// Demodulate stereo L-R signal.
-void FmDecoder::demod_stereo(const SampleVector &samples_baseband,
-                             SampleVector &samples_rawstereo) {
-  // Just multiply the baseband signal with the double-frequency pilot.
+// Product mixer for decoding DSB.
+// samples_out = samples_in * samples_out.
+void FmDecoder::product_mix(const SampleVector &samples_in,
+                            SampleVector &samples_out) {
+  unsigned int n = samples_in.size();
+  assert(n == samples_out.size());
+
+  // Multiply the baseband signal with the double-frequency pilot.
   // And multiply by 2.00 to get the full amplitude.
-  // That's all.
-
-  unsigned int n = samples_baseband.size();
-  assert(n == samples_rawstereo.size());
-
   for (unsigned int i = 0; i < n; i++) {
-    samples_rawstereo[i] *= 2.00 * samples_baseband[i];
+    samples_out[i] *= 2.0 * samples_in[i];
   }
 }
 

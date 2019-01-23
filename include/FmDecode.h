@@ -89,12 +89,11 @@ public:
   /**
    * Process samples and extract 19 kHz pilot tone.
    * Generate phase-locked 38 kHz tone with unit amplitude.
-   * pilot_shift :: true to shift pilot phase
-   *             :: (use cos(2*x) instead of sin (2*x))
-   *             :: (for multipath distortion detection)
+   * sin_samples_out :: output in phase
+   * cos_samples_out :: output in phase delayed for pi/2
    */
-  void process(SampleVector &samples_in, SampleVector &samples_out,
-               bool pilot_shift);
+  void process(SampleVector &samples_in, SampleVector &sin_samples_out,
+               SampleVector &cos_samples_out);
 
   /** Return true if the phase-locked loop is locked. */
   bool locked() const { return m_lock_cnt >= m_lock_delay; }
@@ -205,9 +204,9 @@ public:
   }
 
 private:
-  /** Demodulate stereo L-R signal. */
-  void demod_stereo(const SampleVector &samples_baseband,
-                    SampleVector &samples_stereo);
+  // Product mixer for decoding DSB.
+  // samples_out = samples_in * samples_out.
+  void product_mix(const SampleVector &samples_in, SampleVector &samples_out);
 
   /** Duplicate mono signal in left/right channels. */
   void mono_to_left_right(const SampleVector &samples_mono,
@@ -243,7 +242,10 @@ private:
   SampleVector m_buf_baseband;
   SampleVector m_buf_baseband_raw;
   SampleVector m_buf_mono;
-  SampleVector m_buf_rawstereo;
+  SampleVector m_buf_sin_output;
+  SampleVector m_buf_cos_output;
+  SampleVector m_buf_rawstereo_in;
+  SampleVector m_buf_rawstereo_out;
   SampleVector m_buf_stereo;
 
   FineTuner m_finetuner;
@@ -253,6 +255,8 @@ private:
   DownsampleFilter m_resample_baseband;
   PilotPhaseLock m_pilotpll;
   DownsampleFilter m_resample_mono;
+  DownsampleFilter m_resample_sin_output;
+  DownsampleFilter m_resample_cos_output;
   DownsampleFilter m_resample_stereo;
   HighPassFilterIir m_dcblock_mono;
   HighPassFilterIir m_dcblock_stereo;
