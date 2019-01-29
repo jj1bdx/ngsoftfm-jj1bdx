@@ -1,7 +1,7 @@
 // NGSoftFM - Software decoder for FM broadcast radio with RTL-SDR
 //
 // Copyright (C) 2015 Edouard Griffiths, F4EXB
-// Copyright (C) 2018 Kenji Rikitake, JJ1BDX
+// Copyright (C) 2019 Kenji Rikitake, JJ1BDX
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -20,7 +20,6 @@
 #include <cmath>
 
 #include "FmDecode.h"
-#include "fastatan2.h"
 
 // Compute RMS, peak levels, and estimated
 // over a small prefix of the specified sample vector.
@@ -99,48 +98,74 @@ PhaseDiscriminator::PhaseDiscriminator(double max_freq_dev)
     : m_freq_scale_factor(1.0 / (max_freq_dev * 2.0 * M_PI)) {}
 
 // Process samples.
-void PhaseDiscriminator::process(const IQSampleVector &samples_in,
-                                 SampleVector &samples_out) {
+// A vectorized quadratic discrimination algorithm written by
+// András Retzler, HA7ILM, is used here, as
+// presented in https://github.com/simonyiszk/csdr/blob/master/libcsdr.c
+// as fmdemod_quadri_cf().
+inline void PhaseDiscriminator::process(const IQSampleVector &samples_in,
+                                        SampleVector &samples_out) {
   unsigned int n = samples_in.size();
-  IQSample s0 = m_last1_sample;
-
   samples_out.resize(n);
 
+  // Made static for speeding up processing.
+  static SampleVector temp(n);
+  static std::vector<IQSample::value_type> temp_dq(n);
+  static std::vector<IQSample::value_type> temp_di(n);
+
+  // Compute dq.
+  temp_dq[0] = samples_in[0].real() - m_last1_sample.real();
+  for (unsigned int i = 1; i < n; i++) {
+    temp_dq[i] = samples_in[i].real() - samples_in[i - 1].real();
+  }
+  // Compute di.
+  temp_di[0] = samples_in[0].imag() - m_last1_sample.imag();
+  for (unsigned int i = 1; i < n; i++) {
+    temp_di[i] = samples_in[i].imag() - samples_in[i - 1].imag();
+  }
+  // Compute output numerator.
   for (unsigned int i = 0; i < n; i++) {
-    IQSample s1(samples_in[i]);
-    IQSample d(conj(s0) * s1);
-    // Sample w = atan2(d.imag(), d.real());
-    Sample w = fastatan2(d.imag(), d.real()); // fast approximation of atan2
-    samples_out[i] = w * m_freq_scale_factor;
-    s0 = s1;
+    samples_out[i] = (samples_in[i].imag() * temp_dq[i]) -
+                     (samples_in[i].real() * temp_di[i]);
+  }
+  // Compute output denominator.
+  for (unsigned int i = 0; i < n; i++) {
+    temp[i] = (samples_in[i].imag() * samples_in[i].imag()) +
+              (samples_in[i].real() * samples_in[i].real());
+  }
+  // Scale output.
+  for (unsigned int i = 0; i < n; i++) {
+    samples_out[i] =
+        (temp[i]) ? m_freq_scale_factor * samples_out[i] / temp[i] : 0;
   }
 
-  m_last2_sample = m_last1_sample;
-  m_last1_sample = s0;
+  m_last1_sample = samples_in[n - 1];
 }
 
 // class DiscriminatorEqualizer
 
 // Construct equalizer for phase discriminator.
-// TODO: value optimized for 960kHz sampling rate
 DiscriminatorEqualizer::DiscriminatorEqualizer(double ifeq_static_gain,
                                                double ifeq_fit_factor)
     : m_static_gain(ifeq_static_gain), m_fit_factor(ifeq_fit_factor),
       m_last1_sample(0.0) {}
 
-void DiscriminatorEqualizer::process(const SampleVector &samples_in,
-                                     SampleVector &samples_out) {
+// Process samples.
+inline void DiscriminatorEqualizer::process(const SampleVector &samples_in,
+                                            SampleVector &samples_out) {
   unsigned int n = samples_in.size();
-  Sample s0 = m_last1_sample;
   samples_out.resize(n);
 
-  for (unsigned int i = 0; i < n; i++) {
-    Sample s1 = samples_in[i];
-    Sample mov1 = (s0 + s1) / 2.0;
-    samples_out[i] = m_static_gain * s1 - m_fit_factor * mov1;
-    s0 = s1;
+  // Enhance high frequency.
+  // Max gain: m_static_gain,
+  // deduced by m_fit_factor for the lower frequencies.
+  samples_out[0] = (m_static_gain * samples_in[0]) -
+                   (m_fit_factor * ((samples_in[0] + m_last1_sample) / 2.0));
+  for (unsigned int i = 1; i < n; i++) {
+    samples_out[i] =
+        (m_static_gain * samples_in[i]) -
+        (m_fit_factor * ((samples_in[i] + samples_in[i - 1]) / 2.0));
   }
-  m_last1_sample = s0;
+  m_last1_sample = samples_in[n - 1];
 }
 
 // Class DifferentialDelayLine
@@ -308,8 +333,21 @@ void PilotPhaseLock::process(SampleVector &samples_in,
     m_phasor_q1 = phasor_q;
 
     // Convert I/Q ratio to estimate of phase error.
-    // float <-> double conversion error exists, but anyway...
-    Sample phase_err = fastatan2(phasor_q, phasor_i);
+    // Maximum phase error during the locked state is
+    // +- 0.02 radian, so the atan2() function can be
+    // substituted without problem by a division.
+    Sample phase_err;
+    if (phasor_i > abs(phasor_q)) {
+      // We are within +/- 45 degrees from lock.
+      // Use simple linear approximation of arctan.
+      phase_err = phasor_q / phasor_i;
+    } else if (phasor_q > 0) {
+      // We are lagging more than 45 degrees behind the input.
+      phase_err = 1;
+    } else {
+      // We are more than 45 degrees ahead of the input.
+      phase_err = -1;
+    }
 
     // Detect pilot level (conservative).
     m_pilot_level = std::min(m_pilot_level, phasor_i);
@@ -560,9 +598,8 @@ void FmDecoder::process(const IQSampleVector &samples_in, SampleVector &audio) {
 // Demodulate stereo L-R signal.
 void FmDecoder::demod_stereo(const SampleVector &samples_baseband,
                              SampleVector &samples_rawstereo) {
-  // Just multiply the baseband signal with the double-frequency pilot.
-  // And multiply by 2.00 to get the full amplitude.
-  // That's all.
+  // Multiply the baseband signal with the double-frequency pilot,
+  // and multiply by 2.00 to get the full amplitude.
 
   unsigned int n = samples_baseband.size();
   assert(n == samples_rawstereo.size());

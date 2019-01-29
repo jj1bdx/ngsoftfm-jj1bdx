@@ -45,7 +45,6 @@ public:
 private:
   const Sample m_freq_scale_factor;
   IQSample m_last1_sample;
-  IQSample m_last2_sample;
 };
 
 class DiscriminatorEqualizer {
@@ -103,8 +102,8 @@ public:
   /**
    * Process samples and extract 19 kHz pilot tone.
    * Generate phase-locked 38 kHz tone with unit amplitude.
-   * pilot_shift :: true to shift pilot phase
-   *             :: (use cos(2*x) instead of sin (2*x))
+   * pilot_shift :: true to shift pilot phase by
+   *             :: using cos(2*x) instead of sin (2*x)
    *             :: (for multipath distortion detection)
    */
   void process(SampleVector &samples_in, SampleVector &samples_out,
@@ -140,7 +139,7 @@ private:
 class FmDecoder {
 public:
   static constexpr double default_deemphasis = 50;
-  static constexpr double default_bandwidth_if = 96000;
+  static constexpr double default_bandwidth_if = 100000;
   static constexpr double default_freq_dev = 75000;
   static constexpr double default_bandwidth_pcm = 15000;
   static constexpr double pilot_freq = 19000;

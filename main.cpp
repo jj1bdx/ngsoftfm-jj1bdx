@@ -33,6 +33,7 @@
 
 #include "AudioOutput.h"
 #include "DataBuffer.h"
+#include "EqParameters.h"
 #include "FmDecode.h"
 #include "MovingAverage.h"
 #include "SoftFM.h"
@@ -42,9 +43,7 @@
 #include "HackRFSource.h"
 #include "RtlSdrSource.h"
 
-#include "EqParameters.h"
-
-#define NGSOFTFM_VERSION "0.1.6"
+#define NGSOFTFM_VERSION "0.1.12-dr"
 
 /** Flag is set on SIGINT / SIGTERM. */
 static std::atomic_bool stop_flag(false);
@@ -246,6 +245,18 @@ static bool get_device(std::vector<std::string> &devnames, std::string &devtype,
 
   return true;
 }
+
+// static constants in FmDecoder must be declared here
+// See https://gcc.gnu.org/wiki/VerboseDiagnostics#missing_static_const_definition
+
+constexpr double FmDecoder::default_deemphasis;
+constexpr double FmDecoder::default_bandwidth_if;
+constexpr double FmDecoder::default_freq_dev;
+constexpr double FmDecoder::default_bandwidth_pcm;
+constexpr double FmDecoder::pilot_freq;
+constexpr unsigned int FmDecoder::finetuner_table_size;
+constexpr double FmDecoder::default_deemphasis_eu;
+constexpr double FmDecoder::default_deemphasis_na;
 
 int main(int argc, char **argv) {
   int devidx = 0;

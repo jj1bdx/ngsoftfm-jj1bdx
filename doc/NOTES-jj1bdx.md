@@ -56,6 +56,10 @@ The QMM output has the following characteristics: (quote from the Brian's page)
 
 I've implemented the QMM function as `-X` option, and with the variable `pilot_shift`. This option shifts the phase of regenerated subcarrier for decoding the L-R DSB signal from the original `sin(2*x)` (where x represents the 19kHz pilot frequency) to `cos(2*x)`.
 
+### 28-JAN-2019
+
+Generating in-phase (L-R) and shifted-phase (QMM) signals are possible and experimentally implemented in the branch `phase-distortion-removal`, though this method seems practically of no value. Not really worth trying for.
+
 ## Phase error of 19kHz PLL
 
 ### 1-JAN-2019
@@ -123,6 +127,44 @@ Extended DiscriminatorEqualizer by EqParameters class, using Boost Cubic B-Splin
 ### 17-JAN-2019
 
 Tried to implement FIR adaptive multipath filter for the sampled input before the phase discriminator, but failed. See the branch `failed-multipathfilter`. I will put this for the record only. Computational burden: x2 or x3, not really worth trying for. The coefficients were not stable and did not converge. TODO: learn the basics again.
+
+### 20-JAN-2019
+
+Tried another algorithm to reduce multipath distortion. This algorighm does not diverge by nature (no feedback), but unable to decide the optimal point. See the branch `distortion-reduction`. I will put this for the record only. Computational burden: x2, not really worth trying for.
+
+### 21-JAN-2019
+
+<del>Envelope limiter, which aligns the envelope level of the IF signal to a constant, is introduced. This will affect very little on the strong signals. See the branch `envelope-limiter` for the code (merged to `dev`).</del>
+
+### 22-JAN-2019
+
+Envelope limiter disabled due to unexpected distortion when the modulation level of L-R signal was high.
+
+## Profiling the calculation functions
+
+### 20-JAN-2019
+
+Profiled the function execution time. ~80% of the calculation time were spent by the calculations of FIR and IIR filters. <del>I put back the libm atan2() to PhaseDiscriminator, though this may increase the overall execution time to +5% or so, for the accuracy of the discriminator output. fastatan2() in PilotPhaseLock will not affect much.</del> <- Reverted back to use fastatan2() for PhaseDiscriminator in 0.1.10.
+
+### 23-JAN-2019
+
+* Reverted back to fastatan2() for PhaseDiscriminator.
+* Reverted back to simpler linear arctan approximation for PilotPhaseLock. See git commit 90d7685911b75644b7de6df5eda62187b441f88b for the details.
+* CPU load on Intel NUC DN2820FYKH Celeron N2830 / Ubuntu 18.04 using Airspy R2 with 2.5MHz sample rate was reduced from ~98% to ~82%.
+
+### 27-JAN-2019
+
+* Eliminated fastatan2() and replaced it by a quadratic discriminator without atan2() function written by András Retzler, HA7ILM, as described in https://github.com/simonyiszk/csdr/blob/master/libcsdr.c as the function `fmdemod_quadri_cf()`. Also loop optimized for vectorization.
+
+## Airspy R2
+
+### 23-JAN-2019
+
+Initial test results for Airspy R2:
+
+* Sampling rates: 2.5MHz and 10MHz only. 10MHz looks overkill.
+* Default gain values of lgain and mgain (both 8dB) looks OK. Control IF level by vgain.
+* Stability and quality: at least as good as RTL-SDR V3 for 76 ~ 95MHz.
 
 ## References
 
