@@ -1,5 +1,7 @@
 # ngsoftfm-jj1bdx
 
+*This repository is archived.* See [airspy-fmradion](https://github.com/jj1bdx/airspy-fmradion) for the further development.
+
 * Version 0.1.14, 24-FEB-2019
 * Software decoder for FM broadcast radio with RTL-SDR, AirSpy, and HackRF
 * For MacOS and Linux
